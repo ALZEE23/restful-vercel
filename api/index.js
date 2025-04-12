@@ -1,20 +1,23 @@
 const express = require('express');
-const morgan = require('morgan');
-const indexRouter = require('./routes/index');
+const cors = require('cors');
 
 const app = express();
-app.use(morgan('dev'));
-app.use(express.json());
+const port = 3000;
 
-// CORS: biar frontend bisa akses
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*'); // ubah kalau mau dibatasi
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
-  next();
+// Middleware untuk CORS
+app.use(cors());
+
+// Route untuk root ('/')
+app.get('/', (req, res) => {
+  res.send('Hello, this is the root endpoint!');
 });
 
-app.use('/', indexRouter);
+// Route untuk '/api/users'
+app.get('/api/users', (req, res) => {
+  res.json({ message: 'Hello from Express on Vercel!' });
+});
 
-module.exports = app; // Penting buat Vercel!
+// Start server
+app.listen(port, () => {
+  console.log(`Server running on http://localhost:${port}`);
+});
