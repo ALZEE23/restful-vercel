@@ -6,7 +6,7 @@ const multer = require('multer');
 const upload = multer();
 
 const app = express();
-const port = 3000;
+// const port = 3000;
 // const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'; 
 
 app.use(express.json());
@@ -148,6 +148,8 @@ app.get('/api/protected', authenticateToken, (req, res) => {
   res.json({ message: 'This is protected data', user: req.user });
 });
 
-app.listen(port, () => {
-  console.log(`Server running on http://localhost:${port}`);
-});
+// app.listen(port, () => {
+//   console.log(`Server running on http://localhost:${port}`);
+// });
+
+module.exports = app;
