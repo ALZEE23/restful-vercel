@@ -325,6 +325,20 @@ app.delete('/api/bookmarks/:id', authenticateToken, async (req, res) => {
   res.json({ message: 'Bookmark deleted successfully' });
 });
 
+app.put('api/user', authenticateToken, async (req, res) => {
+  const { email, username } = req.body;
+  const userId = req.user.userId;
+
+  const { error } = await supabase
+    .from('users')
+    .update({ email, username })
+    .eq('id', userId);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: 'User updated successfully' });
+});
+
 app.get('/api/protected', authenticateToken, (req, res) => {
   res.json({ message: 'This is protected data', user: req.user });
 });
