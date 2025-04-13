@@ -134,6 +134,92 @@ app.post('/api/blogs', authenticateToken, upload.single('image'), async (req, re
   }
 });
 
+app.put('/api/blogs/:id', authenticateToken, upload.single('image'), async (req, res) => {
+  try {
+    const blogId = req.params.id;
+    const userId = req.user.userId;
+    const { title, description } = req.body;
+
+    
+    const { data: blog, error: fetchError } = await supabase
+      .from('blogs')
+      .select('*')
+      .eq('id', blogId)
+      .single();
+
+    if (fetchError) {
+      return res.status(404).json({ error: 'Blog not found' });
+    }
+
+    
+    if (blog.user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized to edit this blog' });
+    }
+
+    
+    let imageUrl = blog.image; 
+    if (req.file) {
+      
+      const fileBuffer = req.file.buffer;
+      const fileName = `${Date.now()}_${req.file.originalname}`;
+      const filePath = `blogs/${userId}/${fileName}`;
+
+      const { error: storageError } = await supabase
+        .storage
+        .from('blog-images')
+        .upload(filePath, fileBuffer, {
+          contentType: req.file.mimetype
+        });
+
+      if (storageError) {
+        throw new Error(storageError.message);
+      }
+
+      
+      const { data: { publicUrl } } = supabase
+        .storage
+        .from('blog-images')
+        .getPublicUrl(filePath);
+
+      imageUrl = publicUrl;
+
+      
+      if (blog.image) {
+        const oldPath = blog.image.split('/').pop();
+        await supabase
+          .storage
+          .from('blog-images')
+          .remove([`blogs/${userId}/${oldPath}`]);
+      }
+    }
+
+    
+    const { data: updatedBlog, error: updateError } = await supabase
+      .from('blogs')
+      .update({ 
+        title, 
+        description,
+        image: imageUrl
+      })
+      .eq('id', blogId)
+      .select()
+      .single();
+
+    if (updateError) {
+      throw new Error(updateError.message);
+    }
+
+    res.json({ 
+      message: 'Blog updated successfully',
+      blog: updatedBlog
+    });
+
+  } catch (error) {
+    console.error('Error updating blog:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.get('/api/blogs', async (req, res) => {
  const { data, error } = await supabase
     .from('blogs')
@@ -142,6 +228,101 @@ app.get('/api/blogs', async (req, res) => {
   if (error) return res.status(400).json({ error: error.message });
 
   res.json({object: data});
+});
+
+app.get('/api/myblogs' , async (req, res) => {
+  const { userId } = req.user;
+
+  const { data, error } = await supabase
+    .from('blogs')
+    .select('*')
+    .eq('user_id', userId);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ blogs: data });
+});
+
+app.delete('/api/blogs/:id', authenticateToken, async (req, res) => {
+  const blogId = req.params.id;
+  const userId = req.user.userId;
+
+  const { data: blog, error: fetchError } = await supabase
+    .from('blogs')
+    .select('*')
+    .eq('id', blogId)
+    .single();
+
+  if (fetchError) {
+    return res.status(404).json({ error: 'Blog not found' });
+  }
+
+  if (blog.user_id !== userId) {
+    return res.status(403).json({ error: 'Unauthorized to delete this blog' });
+  }
+
+  
+  const { error: deleteError } = await supabase
+    .from('blogs')
+    .delete()
+    .eq('id', blogId);
+
+  if (deleteError) {
+    return res.status(500).json({ error: deleteError.message });
+  }
+
+  
+  if (blog.image) {
+    const oldPath = blog.image.split('/').pop();
+    await supabase
+      .storage
+      .from('blog-images')
+      .remove([`blogs/${userId}/${oldPath}`]);
+  }
+
+  res.json({ message: 'Blog deleted successfully' });
+}
+);
+
+app.post('/api/bookmarks', authenticateToken, async (req, res) => {
+  const { blogId } = req.body;
+  const userId = req.user.userId;
+
+  const { error } = await supabase
+    .from('bookmarks')
+    .insert([{ user_id: userId, blog_id: blogId }]);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: 'Blog bookmarked successfully' });
+});
+
+app.get('/api/bookmarks', authenticateToken, async (req, res) => {
+  const userId = req.user.userId;
+
+  const { data, error } = await supabase
+    .from('bookmarks')
+    .select('*')
+    .eq('user_id', userId);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ bookmarks: data });
+});
+
+app.delete('/api/bookmarks/:id', authenticateToken, async (req, res) => {
+  const bookmarkId = req.params.id;
+  const userId = req.user.userId;
+
+  const { error } = await supabase
+    .from('bookmarks')
+    .delete()
+    .eq('id', bookmarkId)
+    .eq('user_id', userId);
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json({ message: 'Bookmark deleted successfully' });
 });
 
 app.get('/api/protected', authenticateToken, (req, res) => {
