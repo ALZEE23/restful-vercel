@@ -2,6 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const supabase = require('../lib/SupabaseClient');
+const multer = require('multer');
+const upload = multer();
 
 const app = express();
 const port = 3000;
@@ -77,7 +79,71 @@ app.post('/api/register', async (req, res) => {
   res.json({ userId, email, username });
 });
 
-// Protected route example
+app.post('/api/blogs', authenticateToken, upload.single('image'), async (req, res) => {
+  try {
+    const { title, description } = req.body;
+    const userId = req.user.userId;
+    
+    
+    if (!req.file) {
+      return res.status(400).json({ error: 'Image is required' });
+    }
+
+    
+    const fileBuffer = req.file.buffer;
+    const fileName = `${Date.now()}_${req.file.originalname}`;
+    const filePath = `blogs/${userId}/${fileName}`;
+
+    
+    const { data: storageData, error: storageError } = await supabase
+      .storage
+      .from('blog-images') 
+      .upload(filePath, fileBuffer, {
+        contentType: req.file.mimetype
+      });
+
+    if (storageError) {
+      throw new Error(storageError.message);
+    }
+
+    
+    const { data: { publicUrl } } = supabase
+      .storage
+      .from('blog-images')
+      .getPublicUrl(filePath);
+
+    
+    const { error: dbError } = await supabase
+      .from('blogs')
+      .insert([{ 
+        image: publicUrl,
+        title, 
+        description, 
+        user_id: userId 
+      }]);
+
+    if (dbError) throw new Error(dbError.message);
+
+    res.json({ 
+      message: 'Blog post created successfully',
+      imageUrl: publicUrl
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/blogs', async (req, res) => {
+  const { data, error } = await supabase
+    .from('blogs')
+    .select('*');
+
+  if (error) return res.status(400).json({ error: error.message });
+
+  res.json(data);
+});
+
 app.get('/api/protected', authenticateToken, (req, res) => {
   res.json({ message: 'This is protected data', user: req.user });
 });
