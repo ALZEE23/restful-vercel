@@ -1,13 +1,13 @@
 const express = require('express');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const supabase = require('../lib/SupabaseClient');
+// const jwt = require('jsonwebtoken');
+// const supabase = require('../lib/SupabaseClient');
 const multer = require('multer');
 const upload = multer();
 
 const app = express();
 const port = 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'; 
+// const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key'; 
 
 app.use(express.json());
 app.use(cors());
