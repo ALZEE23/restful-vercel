@@ -135,13 +135,13 @@ app.post('/api/blogs', authenticateToken, upload.single('image'), async (req, re
 });
 
 app.get('/api/blogs', async (req, res) => {
-  const { data, error } = await supabase
+ const { data, error } = await supabase
     .from('blogs')
-    .select('*');
+    .select('*')
 
   if (error) return res.status(400).json({ error: error.message });
 
-  res.json(data);
+  res.json({object: data});
 });
 
 app.get('/api/protected', authenticateToken, (req, res) => {
