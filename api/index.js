@@ -79,54 +79,115 @@ app.post('/api/register', async (req, res) => {
   res.json({ userId, email, username });
 });
 
+
 app.post('/api/blogs', authenticateToken, upload.single('image'), async (req, res) => {
   try {
-    const { title, description } = req.body;
+    const { title, content, publish = false } = req.body; 
     const userId = req.user.userId;
     
-    
-    if (!req.file) {
-      return res.status(400).json({ error: 'Image is required' });
-    }
+    const contentBlocks = typeof content === 'string' ? JSON.parse(content) : content;
 
-    
-    const fileBuffer = req.file.buffer;
-    const fileName = `${Date.now()}_${req.file.originalname}`;
-    const filePath = `blogs/${userId}/${fileName}`;
-
-    
-    const { data: storageData, error: storageError } = await supabase
-      .storage
-      .from('blog-images') 
-      .upload(filePath, fileBuffer, {
-        contentType: req.file.mimetype
-      });
-
-    if (storageError) {
-      throw new Error(storageError.message);
-    }
-
-    
-    const { data: { publicUrl } } = supabase
-      .storage
-      .from('blog-images')
-      .getPublicUrl(filePath);
-
-    
-    const { error: dbError } = await supabase
+    const { data: blog, error: blogError } = await supabase
       .from('blogs')
       .insert([{ 
-        image: publicUrl,
-        title, 
-        description, 
-        user_id: userId 
-      }]);
+        title,
+        user_id: userId,
+        publish: publish === 'true' || publish === true 
+      }])
+      .select()
+      .single();
 
-    if (dbError) throw new Error(dbError.message);
+    if (blogError) throw new Error(blogError.message);
+
+    
+    if (req.file) {
+      const fileBuffer = req.file.buffer;
+      const fileName = `${Date.now()}_${req.file.originalname}`;
+      const filePath = `blogs/${userId}/${fileName}`;
+
+      const { error: storageError } = await supabase
+        .storage
+        .from('blog-images')
+        .upload(filePath, fileBuffer, {
+          contentType: req.file.mimetype
+        });
+
+      if (storageError) throw new Error(storageError.message);
+
+      const { data: { publicUrl } } = supabase
+        .storage
+        .from('blog-images')
+        .getPublicUrl(filePath);
+
+      
+      contentBlocks.push({
+        type: 'image',
+        imageUrl: publicUrl,
+        position: contentBlocks.length + 1
+      });
+    }
+
+    
+    const { error: contentError } = await supabase
+      .from('blog_contents')
+      .insert(
+        contentBlocks.map(block => ({
+          blog_id: blog.id,
+          type: block.type,
+          content: block.content,
+          image_url: block.imageUrl,
+          position: block.position
+        }))
+      );
+
+    if (contentError) throw new Error(contentError.message);
 
     res.json({ 
       message: 'Blog post created successfully',
-      imageUrl: publicUrl
+      blog: {
+        ...blog,
+        content: contentBlocks
+      }
+    });
+
+  } catch (error) {
+    console.error('Error creating blog:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
+app.get('/api/blogs/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+
+    const { data: blog, error: blogError } = await supabase
+      .from('blogs')
+      .select(`
+        *,
+        users (
+          id,
+          username
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (blogError) throw new Error(blogError.message);
+
+    
+    const { data: contents, error: contentError } = await supabase
+      .from('blog_contents')
+      .select('*')
+      .eq('blog_id', id)
+      .order('position');
+
+    if (contentError) throw new Error(contentError.message);
+
+    res.json({
+      ...blog,
+      content: contents
     });
 
   } catch (error) {
@@ -134,11 +195,57 @@ app.post('/api/blogs', authenticateToken, upload.single('image'), async (req, re
   }
 });
 
+
+app.get('/api/blogs', async (req, res) => {
+  try {
+    const { data: blogs, error } = await supabase
+      .from('blogs')
+      .select(`
+        *,
+        users (
+          id,
+          username
+        ),
+        blog_contents (
+          id,
+          type,
+          content,
+          image_url,
+          position
+        )
+      `)
+      .eq('publish', true) 
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching blogs:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    
+    const formattedBlogs = blogs.map(blog => ({
+      id: blog.id,
+      title: blog.title,
+      created_at: blog.created_at,
+      user: blog.users,
+      content: blog.blog_contents.sort((a, b) => a.position - b.position)
+    }));
+
+    res.json({ blogs: formattedBlogs });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.put('/api/blogs/:id', authenticateToken, upload.single('image'), async (req, res) => {
   try {
     const blogId = req.params.id;
     const userId = req.user.userId;
-    const { title, description } = req.body;
+    const { title, content, publish } = req.body;
+    
+    
+    const contentBlocks = typeof content === 'string' ? JSON.parse(content) : content;
 
     
     const { data: blog, error: fetchError } = await supabase
@@ -151,15 +258,12 @@ app.put('/api/blogs/:id', authenticateToken, upload.single('image'), async (req,
       return res.status(404).json({ error: 'Blog not found' });
     }
 
-    
     if (blog.user_id !== userId) {
       return res.status(403).json({ error: 'Unauthorized to edit this blog' });
     }
 
     
-    let imageUrl = blog.image; 
     if (req.file) {
-      
       const fileBuffer = req.file.buffer;
       const fileName = `${Date.now()}_${req.file.originalname}`;
       const filePath = `blogs/${userId}/${fileName}`;
@@ -171,47 +275,72 @@ app.put('/api/blogs/:id', authenticateToken, upload.single('image'), async (req,
           contentType: req.file.mimetype
         });
 
-      if (storageError) {
-        throw new Error(storageError.message);
-      }
+      if (storageError) throw new Error(storageError.message);
 
-      
       const { data: { publicUrl } } = supabase
         .storage
         .from('blog-images')
         .getPublicUrl(filePath);
 
-      imageUrl = publicUrl;
-
-      
-      if (blog.image) {
-        const oldPath = blog.image.split('/').pop();
-        await supabase
-          .storage
-          .from('blog-images')
-          .remove([`blogs/${userId}/${oldPath}`]);
-      }
+    
+      contentBlocks.push({
+        type: 'image',
+        imageUrl: publicUrl,
+        position: contentBlocks.length + 1
+      });
     }
 
-    
+  
     const { data: updatedBlog, error: updateError } = await supabase
       .from('blogs')
       .update({ 
-        title, 
-        description,
-        image: imageUrl
+        title,
+        publish: publish === 'true' || publish === true 
       })
       .eq('id', blogId)
       .select()
       .single();
 
-    if (updateError) {
-      throw new Error(updateError.message);
-    }
+    if (updateError) throw new Error(updateError.message);
+
+    
+    const { error: deleteError } = await supabase
+      .from('blog_contents')
+      .delete()
+      .eq('blog_id', blogId);
+
+    if (deleteError) throw new Error(deleteError.message);
+
+
+    const { error: contentError } = await supabase
+      .from('blog_contents')
+      .insert(
+        contentBlocks.map(block => ({
+          blog_id: blogId,
+          type: block.type,
+          content: block.content,
+          image_url: block.imageUrl,
+          position: block.position
+        }))
+      );
+
+    if (contentError) throw new Error(contentError.message);
+
+    
+    const { data: updatedContents, error: fetchContentError } = await supabase
+      .from('blog_contents')
+      .select('*')
+      .eq('blog_id', blogId)
+      .order('position');
+
+    if (fetchContentError) throw new Error(fetchContentError.message);
 
     res.json({ 
       message: 'Blog updated successfully',
-      blog: updatedBlog
+      blog: {
+        ...updatedBlog,
+        content: updatedContents
+      }
     });
 
   } catch (error) {
@@ -220,69 +349,99 @@ app.put('/api/blogs/:id', authenticateToken, upload.single('image'), async (req,
   }
 });
 
-app.get('/api/blogs', async (req, res) => {
- const { data, error } = await supabase
-    .from('blogs')
-    .select('*')
+app.get('/api/myblogs', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
 
-  if (error) return res.status(400).json({ error: error.message });
+    const { data: blogs, error } = await supabase
+      .from('blogs')
+      .select(`
+        *,
+        users (
+          id,
+          username
+        ),
+        blog_contents (
+          id,
+          type,
+          content,
+          image_url,
+          position
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
 
-  res.json({object: data});
-});
+    
+    const formattedBlogs = blogs.map(blog => ({
+      id: blog.id,
+      title: blog.title,
+      created_at: blog.created_at,
+      publish: blog.publish,
+      user: blog.users,
+      content: blog.blog_contents.sort((a, b) => a.position - b.position)
+    }));
 
-app.get('/api/myblogs' , async (req, res) => {
-  const { userId } = req.user;
-
-  const { data, error } = await supabase
-    .from('blogs')
-    .select('*')
-    .eq('user_id', userId);
-
-  if (error) return res.status(400).json({ error: error.message });
-
-  res.json({ blogs: data });
+    res.json({ blogs: formattedBlogs });
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 app.delete('/api/blogs/:id', authenticateToken, async (req, res) => {
-  const blogId = req.params.id;
-  const userId = req.user.userId;
+  try {
+    const blogId = req.params.id;
+    const userId = req.user.userId;
 
-  const { data: blog, error: fetchError } = await supabase
-    .from('blogs')
-    .select('*')
-    .eq('id', blogId)
-    .single();
+    
+    const { data: blog, error: fetchError } = await supabase
+      .from('blogs')
+      .select('*, blog_contents(*)')
+      .eq('id', blogId)
+      .single();
 
-  if (fetchError) {
-    return res.status(404).json({ error: 'Blog not found' });
+    if (fetchError) {
+      return res.status(404).json({ error: 'Blog not found' });
+    }
+
+    if (blog.user_id !== userId) {
+      return res.status(403).json({ error: 'Unauthorized to delete this blog' });
+    }
+
+    
+    const imageContents = blog.blog_contents.filter(content => content.type === 'image');
+    if (imageContents.length > 0) {
+      for (const content of imageContents) {
+        if (content.image_url) {
+          const imagePath = `blogs/${userId}/${content.image_url.split('/').pop()}`;
+          await supabase.storage
+            .from('blog-images')
+            .remove([imagePath]);
+        }
+      }
+    }
+
+    
+    const { error: deleteError } = await supabase
+      .from('blogs')
+      .delete()
+      .eq('id', blogId);
+
+    if (deleteError) {
+      throw new Error(deleteError.message);
+    }
+
+    res.json({ 
+      message: 'Blog and all associated content deleted successfully',
+      blogId
+    });
+
+  } catch (error) {
+    console.error('Error deleting blog:', error);
+    res.status(500).json({ error: error.message });
   }
-
-  if (blog.user_id !== userId) {
-    return res.status(403).json({ error: 'Unauthorized to delete this blog' });
-  }
-
-  
-  const { error: deleteError } = await supabase
-    .from('blogs')
-    .delete()
-    .eq('id', blogId);
-
-  if (deleteError) {
-    return res.status(500).json({ error: deleteError.message });
-  }
-
-  
-  if (blog.image) {
-    const oldPath = blog.image.split('/').pop();
-    await supabase
-      .storage
-      .from('blog-images')
-      .remove([`blogs/${userId}/${oldPath}`]);
-  }
-
-  res.json({ message: 'Blog deleted successfully' });
-}
-);
+});
 
 app.post('/api/bookmarks', authenticateToken, async (req, res) => {
   const { blogId } = req.body;
