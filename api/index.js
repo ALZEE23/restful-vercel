@@ -295,7 +295,7 @@ app.put('/api/blogs/:id', authenticateToken, upload.single('image'), async (req,
       .from('blogs')
       .update({ 
         title,
-        publish: publish === 'true' || publish === true 
+        publish: publish == 'true' || publish == true 
       })
       .eq('id', blogId)
       .select()
