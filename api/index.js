@@ -506,7 +506,8 @@ app.get('/api/user', authenticateToken, async (req, res) => {
       .from('users')
       .select(`
         id,
-        username
+        username,
+        email
       `)
       .eq('id', userId)
       .single();
