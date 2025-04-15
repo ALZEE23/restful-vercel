@@ -498,6 +498,36 @@ app.put('api/user', authenticateToken, async (req, res) => {
   res.json({ message: 'User updated successfully' });
 });
 
+app.get('/api/user', authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+
+    const { data: user, error } = await supabase
+      .from('users')
+      .select(`
+        id,
+        username
+      `)
+      .eq('id', userId)
+      .single();
+
+    if (error) {
+      console.error('Error fetching user:', error);
+      return res.status(400).json({ error: error.message });
+    }
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    res.json({ user });
+    
+  } catch (error) {
+    console.error('Error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 app.get('/api/protected', authenticateToken, (req, res) => {
   res.json({ message: 'This is protected data', user: req.user });
 });
